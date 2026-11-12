@@ -1,0 +1,38 @@
+name: formation-postgres
+
+services:
+  db:
+    build: ./docker
+    image: formation-postgres:18
+    environment:
+      POSTGRES_PASSWORD: formation
+      POSTGRES_DB: opsdb
+      # Nombre de lignes de la table mesure, lu au premier démarrage uniquement.
+      MESURES: ${MESURES:-1000000}
+    # pg_stat_statements doit être chargé au démarrage du serveur ;
+    # track_io_timing ajoute les temps de lecture disque dans EXPLAIN (ANALYZE, BUFFERS).
+    command: ["postgres",
+              "-c", "shared_preload_libraries=pg_stat_statements",
+              "-c", "track_io_timing=on"]
+    # Le 64 Mo par défaut de Docker est trop juste pour les requêtes parallèles.
+    shm_size: 256mb
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      # Depuis l'image postgres:18, le volume se monte sur /var/lib/postgresql
+      # (et non plus sur /var/lib/postgresql/data).
+      - pgdata:/var/lib/postgresql
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./travail:/travail
+    healthcheck:
+      # -h 127.0.0.1 force une connexion TCP. Pendant le chargement initial,
+      # le serveur temporaire n'écoute que sur le socket Unix : sans -h, le
+      # conteneur serait déclaré prêt avant la fin du chargement.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d opsdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+volumes:
+  pgdata:

@@ -1,0 +1,43 @@
+name: Environnement
+
+# Vérifie à chaque modification que l'image se construit, que la base se
+# charge et que le rattrapage s'applique sur une base neuve.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  environnement:
+    runs-on: ubuntu-latest
+    env:
+      MESURES: "200000"
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Construire et démarrer
+        run: docker compose up -d --build --wait --wait-timeout 900
+
+      - name: Vérifier l'environnement
+        run: ./scripts/verifier.sh
+
+      - name: Appliquer les rattrapages
+        run: |
+          for f in rattrapage/*.sql; do
+            ./scripts/rattrapage.sh "$(basename "$f" | cut -d- -f1)"
+          done
+
+      - name: Vérifier PL/Python
+        run: |
+          docker compose exec -T db psql -U postgres -d opsdb -X -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE EXTENSION plpython3u;
+          DO LANGUAGE plpython3u $$ plpy.notice('PL/Python fonctionne') $$;
+          DROP EXTENSION plpython3u;
+          SQL
+
+      - name: Journaux du serveur en cas d'échec
+        if: failure()
+        run: docker compose logs db
